@@ -59,5 +59,6 @@ Note: The model name in `{{ ref('...') }}` should correspond to the folder name 
 
 ## Usage
 - `cd {project_name}`
+- `go mod tidy`
 - `go build .`
 - `go run . -threads=4 -full-refresh=true`
