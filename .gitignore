@@ -1,0 +1,26 @@
+# Binaries
+orchestrator
+*.exe
+
+# Environment
+.env
+profile.yml
+sources.yml
+
+# DuckDB
+*.duckdb
+*.duckdb.wal
+
+# Output
+results.txt
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+
+# Go
+vendor/
+

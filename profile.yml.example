@@ -1,0 +1,4 @@
+duckdb_file: /path/to/orchestrator.duckdb
+models_folder: /path/to/models
+output_folder: /path/to/output
+sources_path: /path/to/sources.yml

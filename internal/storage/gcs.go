@@ -1,10 +1,9 @@
-package main
+package storage
 
 import (
 	"context"
 	"fmt"
 	"io"
-	"log"
 	"os"
 
 	"cloud.google.com/go/storage"
@@ -25,6 +24,13 @@ func NewGCPStorage(ctx context.Context, bucket string) (*GCPStorage, error) {
 		client: client,
 		bucket: bucket,
 	}, nil
+}
+
+func (s *GCPStorage) Close() error {
+	if s == nil || s.client == nil {
+		return nil
+	}
+	return s.client.Close()
 }
 
 func (s *GCPStorage) DownloadFile(ctx context.Context, objectName, destinationPath string) error {
@@ -92,13 +98,10 @@ func (s *GCPStorage) DeletePrefix(ctx context.Context, prefix string) error {
 	}
 }
 
-func initGCS(bucket string) *GCPStorage {
+// InitGCS creates a GCPStorage client if a bucket is configured, or returns nil.
+func InitGCS(bucket string) (*GCPStorage, error) {
 	if bucket == "" {
-		return nil
+		return nil, nil
 	}
-	gcs, err := NewGCPStorage(context.Background(), bucket)
-	if err != nil {
-		log.Fatalf("init GCS: %v", err)
-	}
-	return gcs
+	return NewGCPStorage(context.Background(), bucket)
 }
