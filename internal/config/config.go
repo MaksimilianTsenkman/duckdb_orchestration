@@ -14,8 +14,8 @@ type ModelConfig struct {
 	RefMapping          map[string]string `json:"ref_mapping"`
 	SourceMapping       map[string]string `json:"-"`
 	OutputDir           string            `json:"output_dir"`
-	StorageLocation     string            `json:"-"`
-	StorageOption       string            `json:"-"`
+	StorageType         string            `json:"-"`
+	StoragePath         string            `json:"-"`
 	SplitRows           int               `json:"split_rows,omitempty"`
 	Incremental         bool              `json:"incremental"`
 	IncrementalStrategy string            `json:"-"`
@@ -26,13 +26,14 @@ type Profile struct {
 	DuckDBFile   string `yaml:"duckdb_file"`
 	ModelsFolder string `yaml:"models_folder"`
 	OutputFolder string `yaml:"output_folder"`
-	SourcesPath  string `yaml:"sources_path"`
+	LogsFolder   string `yaml:"logs_folder"`
+	Threads      int    `yaml:"threads"`
+	FullRefresh  bool   `yaml:"full_refresh"`
 }
 
 type SourceCatalog struct {
 	Sources []SourceDefinition `yaml:"sources"`
-
-	index map[string]ResolvedSource
+	index   map[string]ResolvedSource
 }
 
 type ResolvedSource struct {
@@ -73,8 +74,8 @@ func (p *Profile) Validate() error {
 	if strings.TrimSpace(p.OutputFolder) == "" {
 		return fmt.Errorf("profile.output_folder is required")
 	}
-	if strings.TrimSpace(p.SourcesPath) == "" {
-		return fmt.Errorf("profile.sources_path is required")
+	if p.Threads <= 0 {
+		return fmt.Errorf("profile.threads must be greater than 0")
 	}
 	return nil
 }

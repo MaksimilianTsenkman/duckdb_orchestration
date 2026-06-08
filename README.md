@@ -26,21 +26,25 @@ It processes templated SQL models with dependency resolution, executes them in t
 
 - Go 1.20+
 - DuckDB installed
-- `profile.yml` file with:
+- `setup/profile.yml` file with:
   - `duckdb_file`
   - `models_folder`
   - `output_folder` (`_build`, `_refs`, `_sources` working area)
-  - `sources_path`
+  - `logs_folder` (`results.txt` style execution log output)
+  - `threads`
+  - `full_refresh`
 
 Profile example:
 ```yaml
 duckdb_file: /tmp/orchestrator.duckdb
 models_folder: /path/to/models
 output_folder: /path/to/output
-sources_path: /path/to/sources.yml
+logs_folder: /path/to/logs
+threads: 4
+full_refresh: false
 ```
 
-Sources file example:
+`setup/sources.yml` example:
 ```
 sources:
   - name: ds_dbt
@@ -62,8 +66,8 @@ Sql file example:
 {{
     config(
         materialized='incremental',
-        storage_location='gcs',
-        storage_option='gs://your-bucket-name/dwh/kpi_forecast_actives_daily_percentage_splits',
+        storage_type='gcs',
+        storage_path='gs://your-bucket-name/dwh/kpi_forecast_actives_daily_percentage_splits',
         partition_column='FlightDate',
         incremental_strategy='insert_overwrite'
     )
@@ -99,4 +103,4 @@ Notes:
 - `cd {project_name}`
 - `go mod tidy`
 - `go build .`
-- `go run ./cmd/orchestrator -profile=profile.yml -threads=4 -full-refresh=true`
+- `go run ./cmd/orchestrator`

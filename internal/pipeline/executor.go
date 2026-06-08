@@ -4,7 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -20,10 +20,10 @@ import (
 type RunConfig struct {
 	Threads       int
 	FullRefresh   bool
-	ResultsFile   string
 	Profile       *config.Profile
 	Sources       *config.SourceCatalog
 	ModelRegistry map[string]config.ModelConfig
+	LogsDir       string
 }
 
 func prepareMappingConfig(m *config.ModelConfig, rc RunConfig) error {
@@ -33,11 +33,13 @@ func prepareMappingConfig(m *config.ModelConfig, rc RunConfig) error {
 	if m.SplitRows <= 0 {
 		m.SplitRows = 1_000_000
 	}
-	if m.StorageLocation == "" {
-		m.StorageLocation = "local"
+	if m.StorageType == "" {
+		m.StorageType = "local"
 	}
-	if m.StorageOption == "" {
-		m.StorageOption = filepath.Join(m.OutputDir, m.ModelName)
+	if m.StoragePath == "" {
+		m.StoragePath = filepath.Join(m.OutputDir, m.ModelName)
+	} else if m.StorageType == "local" && !filepath.IsAbs(m.StoragePath) {
+		m.StoragePath = filepath.Join(m.OutputDir, m.StoragePath)
 	}
 	if m.IncrementalStrategy != "" && m.IncrementalStrategy != "insert_overwrite" {
 		return fmt.Errorf("unsupported incremental strategy %q for model %s", m.IncrementalStrategy, m.ModelName)
@@ -228,8 +230,8 @@ func collectParquetFiles(outDir, partitionCol string) ([]string, error) {
 	return files, nil
 }
 
-func processMapping(m config.ModelConfig, db *sql.DB, rc RunConfig) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Minute)
+func processMapping(ctx context.Context, m config.ModelConfig, db *sql.DB, rc RunConfig) error {
+	ctx, cancel := context.WithTimeout(ctx, 180*time.Minute)
 	defer cancel()
 
 	if err := prepareMappingConfig(&m, rc); err != nil {
@@ -266,44 +268,59 @@ func processMapping(m config.ModelConfig, db *sql.DB, rc RunConfig) error {
 	return nil
 }
 
-func ExecuteQueries(db *sql.DB, modelsToProcess [][]config.ModelConfig, rc RunConfig) {
-	var fileMu sync.Mutex
-	for _, layer := range modelsToProcess {
-		var wg sync.WaitGroup
-		sem := make(chan struct{}, rc.Threads)
+func ExecuteQueries(ctx context.Context, db *sql.DB, modelsToProcess [][]config.ModelConfig, rc RunConfig) error {
+	var logMu sync.Mutex
+	for layerIdx, layer := range modelsToProcess {
+		slog.Info("starting execution layer", "layer", layerIdx+1, "models", len(layer))
+		eg, layerCtx := errgroup.WithContext(ctx)
+		eg.SetLimit(rc.Threads)
 
 		for _, m := range layer {
 			m := m
-			wg.Add(1)
-			sem <- struct{}{}
-			fmt.Println("Inside process mapping", m)
-
-			go func(m config.ModelConfig) {
-				defer wg.Done()
-				defer func() { <-sem }()
+			eg.Go(func() error {
 				start := time.Now()
-				modelErr := processMapping(m, db, rc)
+				modelErr := processMapping(layerCtx, m, db, rc)
 				elapsed := time.Since(start).Seconds()
+				logMu.Lock()
+				appendModelLog(rc.LogsDir, m, elapsed, modelErr)
+				logMu.Unlock()
 
-				fileMu.Lock()
-				logResult(rc.ResultsFile, m.SQLFile, elapsed, modelErr)
-				fileMu.Unlock()
-			}(m)
+				if modelErr != nil {
+					slog.Error("model execution failed", "model", m.ModelName, "sql_file", m.SQLFile, "duration_seconds", elapsed, "error", modelErr)
+					return modelErr
+				}
+				slog.Info("model execution finished", "model", m.ModelName, "sql_file", m.SQLFile, "duration_seconds", elapsed)
+				return nil
+			})
 		}
-		wg.Wait()
+		if err := eg.Wait(); err != nil {
+			return err
+		}
+		slog.Info("execution layer finished", "layer", layerIdx+1, "models", len(layer))
 	}
+	return nil
 }
 
-func logResult(resultsFile, sqlFile string, duration float64, err error) {
-	f, ferr := os.OpenFile(resultsFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-	if ferr != nil {
-		log.Printf("open %s: %v", resultsFile, ferr)
+func appendModelLog(logsDir string, m config.ModelConfig, duration float64, modelErr error) {
+	if logsDir == "" {
+		return
+	}
+	if err := os.MkdirAll(logsDir, 0755); err != nil {
+		slog.Error("create logs dir", "path", logsDir, "error", err)
+		return
+	}
+
+	path := filepath.Join(logsDir, "results.txt")
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		slog.Error("open model log", "path", path, "error", err)
 		return
 	}
 	defer f.Close()
-	if err != nil {
-		fmt.Fprintf(f, "%s - error: %v\n", sqlFile, err)
-	} else {
-		fmt.Fprintf(f, "%s - duration: %.2fs\n", sqlFile, duration)
+
+	if modelErr != nil {
+		_, _ = fmt.Fprintf(f, "%s - error: %v\n", m.SQLFile, modelErr)
+		return
 	}
+	_, _ = fmt.Fprintf(f, "%s - duration: %.2fs\n", m.SQLFile, duration)
 }

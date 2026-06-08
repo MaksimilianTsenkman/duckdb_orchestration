@@ -1,145 +1,15 @@
 package dag
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/maksimilian/duckdb-orchestrator/internal/config"
 )
 
-func TestLoadProject_Recursive(t *testing.T) {
-	dir := t.TempDir()
-	stagingDir := filepath.Join(dir, "stg")
-	if err := os.MkdirAll(stagingDir, 0755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-
-	upstreamPath := filepath.Join(stagingDir, "upstream.sql")
-	downstreamPath := filepath.Join(stagingDir, "downstream.sql")
-	os.WriteFile(upstreamPath, []byte("SELECT 1"), 0644)
-	os.WriteFile(downstreamPath, []byte("SELECT * FROM {{ ref('upstream') }}"), 0644)
-
-	project, err := LoadProject(
-		dir,
-		func(path string) (config.ModelConfig, error) { return config.ModelConfig{}, nil },
-		func(path string) ([]string, error) {
-			data, err := os.ReadFile(path)
-			if err != nil {
-				return nil, err
-			}
-			if strings.Contains(string(data), "{{ ref('upstream') }}") {
-				return []string{"upstream"}, nil
-			}
-			return nil, nil
-		},
-		func(path string) ([]string, error) { return nil, nil },
-	)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if project.Models["upstream"].Config.SQLFile != upstreamPath {
-		t.Fatalf("expected upstream path %s, got %s", upstreamPath, project.Models["upstream"].Config.SQLFile)
-	}
-	if project.Models["downstream"].Config.SQLFile != downstreamPath {
-		t.Fatalf("expected downstream path %s, got %s", downstreamPath, project.Models["downstream"].Config.SQLFile)
-	}
-}
-
-func TestValidateSources(t *testing.T) {
-	project := &Project{
-		Models: map[string]Model{
-			"fact_orders": {
-				Config:  config.ModelConfig{ModelName: "fact_orders"},
-				Sources: []string{"warehouse.orders"},
-			},
-		},
-	}
-	sources := &config.SourceCatalog{
-		Sources: []config.SourceDefinition{
-			{
-				Name: "warehouse",
-				Path: "/tmp",
-				Tables: []config.SourceTableSpec{
-					{Name: "orders"},
-				},
-			},
-		},
-	}
-
-	if err := ValidateSources(project, sources); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestValidateSources_MissingSource(t *testing.T) {
-	project := &Project{
-		Models: map[string]Model{
-			"fact_orders": {
-				Config:  config.ModelConfig{ModelName: "fact_orders"},
-				Sources: []string{"warehouse.orders"},
-			},
-		},
-	}
-
-	err := ValidateSources(project, &config.SourceCatalog{})
-	if err == nil {
-		t.Fatal("expected validation error")
-	}
-	if !strings.Contains(err.Error(), "fact_orders") {
-		t.Fatalf("expected model name in error, got %v", err)
-	}
-}
-
-func TestValidateModelConfigs(t *testing.T) {
-	project := &Project{
-		Models: map[string]Model{
-			"fact_orders": {
-				Config: config.ModelConfig{
-					ModelName:           "fact_orders",
-					StorageLocation:     "gcs",
-					StorageOption:       "gs://bucket/dwh/fact_orders",
-					Incremental:         true,
-					IncrementalStrategy: "insert_overwrite",
-					PartitionColumn:     "event_date",
-				},
-			},
-		},
-	}
-
-	if err := ValidateModelConfigs(project); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestValidateModelConfigs_InvalidConfig(t *testing.T) {
-	project := &Project{
-		Models: map[string]Model{
-			"fact_orders": {
-				Config: config.ModelConfig{
-					ModelName:           "fact_orders",
-					StorageLocation:     "weirdfs",
-					Incremental:         true,
-					IncrementalStrategy: "merge",
-				},
-			},
-		},
-	}
-
-	err := ValidateModelConfigs(project)
-	if err == nil {
-		t.Fatal("expected config validation error")
-	}
-	if !strings.Contains(err.Error(), "fact_orders") {
-		t.Fatalf("expected model name in error, got %v", err)
-	}
-}
-
 func TestExecutionPlan_UsesResolvedSQLPaths(t *testing.T) {
-	project := &Project{
-		Models: map[string]Model{
+	project := &config.Project{
+		Models: map[string]config.ProjectModel{
 			"upstream": {
 				Config: config.ModelConfig{
 					ModelName: "upstream",
@@ -175,8 +45,8 @@ func TestExecutionPlan_UsesResolvedSQLPaths(t *testing.T) {
 }
 
 func TestExecutionPlan_DetectsCycle(t *testing.T) {
-	project := &Project{
-		Models: map[string]Model{
+	project := &config.Project{
+		Models: map[string]config.ProjectModel{
 			"a": {Config: config.ModelConfig{ModelName: "a"}, Refs: []string{"b"}},
 			"b": {Config: config.ModelConfig{ModelName: "b"}, Refs: []string{"a"}},
 		},
@@ -192,8 +62,8 @@ func TestExecutionPlan_DetectsCycle(t *testing.T) {
 }
 
 func TestNewGraph(t *testing.T) {
-	project := &Project{
-		Models: map[string]Model{
+	project := &config.Project{
+		Models: map[string]config.ProjectModel{
 			"upstream": {
 				Config: config.ModelConfig{ModelName: "upstream"},
 			},

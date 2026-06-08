@@ -60,7 +60,9 @@ func TestLoadProfile(t *testing.T) {
 duckdb_file: /tmp/test.duckdb
 models_folder: /tmp/models
 output_folder: /tmp/output
-sources_path: /tmp/sources.yml
+logs_folder: /tmp/logs
+threads: 4
+full_refresh: true
 `), 0644)
 
 	cfg, err := LoadProfile(path)
@@ -76,8 +78,14 @@ sources_path: /tmp/sources.yml
 	if cfg.OutputFolder != "/tmp/output" {
 		t.Fatalf("unexpected output folder: %s", cfg.OutputFolder)
 	}
-	if cfg.SourcesPath != "/tmp/sources.yml" {
-		t.Fatalf("unexpected sources path: %s", cfg.SourcesPath)
+	if cfg.LogsFolder != "/tmp/logs" {
+		t.Fatalf("unexpected logs folder: %s", cfg.LogsFolder)
+	}
+	if cfg.Threads != 4 {
+		t.Fatalf("unexpected threads: %d", cfg.Threads)
+	}
+	if !cfg.FullRefresh {
+		t.Fatal("expected full refresh to be true")
 	}
 }
 
@@ -86,8 +94,8 @@ func TestLoadProfile_MissingRequiredField(t *testing.T) {
 	path := filepath.Join(dir, "profile.yml")
 	os.WriteFile(path, []byte(`
 duckdb_file: /tmp/test.duckdb
-models_folder: /tmp/models
 output_folder: /tmp/output
+threads: 4
 `), 0644)
 
 	_, err := LoadProfile(path)

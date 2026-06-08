@@ -3,7 +3,7 @@ package pipeline
 import (
 	"context"
 	"fmt"
-	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -33,40 +33,41 @@ func PullRefs(ctx context.Context, model *config.ModelConfig, registry map[strin
 }
 
 func materializeRef(ctx context.Context, upstream config.ModelConfig, outputDir string) (string, error) {
-	switch upstream.StorageLocation {
+	switch upstream.StorageType {
 	case "", "local":
 		return modelReadPattern(upstream), nil
 	case "gcs":
 		cacheDir := filepath.Join(outputDir, "_refs", upstream.ModelName)
-		return downloadGCSLocation(ctx, upstream.StorageOption, upstream.PartitionColumn, cacheDir)
+		return downloadGCSLocation(ctx, upstream.StoragePath, upstream.PartitionColumn, cacheDir)
 	case "s3", "blob", "azure", "azblob":
-		return "", fmt.Errorf("ref storage type %q is not implemented yet", upstream.StorageLocation)
+		return "", fmt.Errorf("ref storage type %q is not implemented yet", upstream.StorageType)
 	default:
-		return "", fmt.Errorf("unsupported ref storage type %q", upstream.StorageLocation)
+		return "", fmt.Errorf("unsupported ref storage type %q", upstream.StorageType)
 	}
 }
 
 func publishModelOutput(ctx context.Context, model *config.ModelConfig, buildDir string, fullRefresh bool) error {
-	switch model.StorageLocation {
+	switch model.StorageType {
 	case "", "local":
-		return publishLocalOutput(model, buildDir, fullRefresh)
+		return publishLocalOutput(ctx, model, buildDir, fullRefresh)
 	case "gcs":
 		return publishGCSOutput(ctx, model, buildDir, fullRefresh)
 	case "s3", "blob", "azure", "azblob":
-		return fmt.Errorf("model storage type %q is not implemented yet", model.StorageLocation)
+		return fmt.Errorf("model storage type %q is not implemented yet", model.StorageType)
 	default:
-		return fmt.Errorf("unsupported model storage type %q", model.StorageLocation)
+		return fmt.Errorf("unsupported model storage type %q", model.StorageType)
 	}
 }
 
-func publishLocalOutput(model *config.ModelConfig, buildDir string, fullRefresh bool) error {
-	targetDir := model.StorageOption
+func publishLocalOutput(ctx context.Context, model *config.ModelConfig, buildDir string, fullRefresh bool) error {
+	targetDir := model.StoragePath
 	if targetDir == "" {
 		return fmt.Errorf("missing local storage target for model %s", model.ModelName)
 	}
+	store := storage.NewLocalStorage("/")
 
 	if fullRefresh || !model.Incremental {
-		if err := os.RemoveAll(targetDir); err != nil {
+		if err := store.DeletePrefix(ctx, targetDir); err != nil {
 			return err
 		}
 	}
@@ -91,7 +92,7 @@ func publishLocalOutput(model *config.ModelConfig, buildDir string, fullRefresh 
 		if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
 			return err
 		}
-		if err := copyFile(src, dst); err != nil {
+		if err := store.UploadFile(ctx, src, dst); err != nil {
 			return err
 		}
 	}
@@ -100,7 +101,7 @@ func publishLocalOutput(model *config.ModelConfig, buildDir string, fullRefresh 
 }
 
 func publishGCSOutput(ctx context.Context, model *config.ModelConfig, buildDir string, fullRefresh bool) error {
-	bucket, prefix, err := parseGCSLocation(model.StorageOption)
+	bucket, prefix, err := parseGCSLocation(model.StoragePath)
 	if err != nil {
 		return err
 	}
@@ -192,7 +193,7 @@ func modelReadPattern(model config.ModelConfig) string {
 	if model.PartitionColumn != "" {
 		pattern = "*/*.parquet"
 	}
-	return filepath.Join(model.StorageOption, filepath.FromSlash(pattern))
+	return filepath.Join(model.StoragePath, filepath.FromSlash(pattern))
 }
 
 func downloadGCSLocation(ctx context.Context, location, partitionColumn, cacheDir string) (string, error) {
@@ -231,31 +232,13 @@ func downloadGCSLocation(ctx context.Context, location, partitionColumn, cacheDi
 	if err := eg.Wait(); err != nil {
 		return "", err
 	}
+	slog.Info("materialized gcs location", "source", location, "cache_dir", cacheDir)
 
 	pattern := "*.parquet"
 	if partitionColumn != "" {
 		pattern = "*/*.parquet"
 	}
 	return filepath.Join(cacheDir, filepath.FromSlash(pattern)), nil
-}
-
-func copyFile(src, dst string) error {
-	in, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer in.Close()
-
-	out, err := os.Create(dst)
-	if err != nil {
-		return err
-	}
-	defer out.Close()
-
-	if _, err := io.Copy(out, in); err != nil {
-		return err
-	}
-	return out.Close()
 }
 
 func ensureTrailingSlash(input string) string {

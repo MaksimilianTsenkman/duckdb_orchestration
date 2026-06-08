@@ -56,6 +56,14 @@ func StripConfigBlocks(raw string) string {
 	return reConfig.ReplaceAllString(raw, "")
 }
 
+func ParseSQLFileModelConfig(filePath string) (config.ModelConfig, error) {
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return config.ModelConfig{}, err
+	}
+	return ParseModelConfig(string(data))
+}
+
 func ParseModelConfig(raw string) (config.ModelConfig, error) {
 	cfg := config.ModelConfig{}
 	reConfig := regexp.MustCompile(`(?s)\{\{\s*config\s*\((.*?)\)\s*\}\}`)
@@ -79,10 +87,10 @@ func ParseModelConfig(raw string) (config.ModelConfig, error) {
 		value = trimQuoted(value)
 
 		switch key {
-		case "storage_location":
-			cfg.StorageLocation = strings.ToLower(value)
-		case "storage_option":
-			cfg.StorageOption = value
+		case "storage_type":
+			cfg.StorageType = strings.ToLower(value)
+		case "storage_path":
+			cfg.StoragePath = value
 		case "partition_column":
 			cfg.PartitionColumn = value
 		case "incremental_strategy":
@@ -178,8 +186,8 @@ func RenderTemplate(raw string, inc bool) string {
 		if loc == nil {
 			break
 		}
-		tStart, tEnd := loc[2], loc[3] // true block
-		fStart, fEnd := loc[4], loc[5] // false block
+		tStart, tEnd := loc[2], loc[3]
+		fStart, fEnd := loc[4], loc[5]
 		replace := raw[fStart:fEnd]
 		if inc {
 			replace = raw[tStart:tEnd]

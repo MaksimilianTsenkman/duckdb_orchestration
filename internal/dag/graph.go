@@ -2,129 +2,19 @@ package dag
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/maksimilian/duckdb-orchestrator/internal/config"
 )
 
 type Graph struct {
-	project    *Project
+	project    *config.Project
 	dependents map[string][]string
 	inDegree   map[string]int
 	registry   map[string]config.ModelConfig
 }
 
-type Project struct {
-	Models map[string]Model
-}
-
-type Model struct {
-	Config  config.ModelConfig
-	Refs    []string
-	Sources []string
-}
-
-var supportedStorageLocations = map[string]struct{}{
-	"":       {},
-	"local":  {},
-	"gcs":    {},
-	"s3":     {},
-	"blob":   {},
-	"azure":  {},
-	"azblob": {},
-}
-
-func LoadProject(
-	dir string,
-	modelParser func(string) (config.ModelConfig, error),
-	refParser func(string) ([]string, error),
-	sourceParser func(string) ([]string, error),
-) (*Project, error) {
-	project := &Project{Models: make(map[string]Model)}
-
-	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if d.IsDir() || filepath.Ext(d.Name()) != ".sql" {
-			return nil
-		}
-
-		modelName := strings.TrimSuffix(d.Name(), ".sql")
-		if existing, ok := project.Models[modelName]; ok {
-			return fmt.Errorf("duplicate model name %q found in %s and %s", modelName, existing.Config.SQLFile, path)
-		}
-
-		cfg, err := modelParser(path)
-		if err != nil {
-			return err
-		}
-		refs, err := refParser(path)
-		if err != nil {
-			return err
-		}
-		sources, err := sourceParser(path)
-		if err != nil {
-			return err
-		}
-
-		cfg.ModelName = modelName
-		cfg.SQLFile = path
-		project.Models[modelName] = Model{
-			Config:  cfg,
-			Refs:    refs,
-			Sources: sources,
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	return project, nil
-}
-
-func ValidateSources(project *Project, sources *config.SourceCatalog) error {
-	for modelName, model := range project.Models {
-		for _, sourceRef := range model.Sources {
-			parts := strings.SplitN(sourceRef, ".", 2)
-			if len(parts) != 2 {
-				return fmt.Errorf("model %q has invalid source reference %q", modelName, sourceRef)
-			}
-			if _, err := sources.Resolve(parts[0], parts[1]); err != nil {
-				return fmt.Errorf("model %q references invalid source %q: %w", modelName, sourceRef, err)
-			}
-		}
-	}
-	return nil
-}
-
-func ValidateModelConfigs(project *Project) error {
-	for modelName, model := range project.Models {
-		cfg := model.Config
-
-		if _, ok := supportedStorageLocations[cfg.StorageLocation]; !ok {
-			return fmt.Errorf("model %q has unsupported storage_location %q", modelName, cfg.StorageLocation)
-		}
-		if cfg.StorageLocation != "" && strings.TrimSpace(cfg.StorageOption) == "" {
-			return fmt.Errorf("model %q has storage_location %q but no storage_option", modelName, cfg.StorageLocation)
-		}
-		if cfg.IncrementalStrategy != "" && cfg.IncrementalStrategy != "insert_overwrite" {
-			return fmt.Errorf("model %q has unsupported incremental_strategy %q", modelName, cfg.IncrementalStrategy)
-		}
-		if cfg.IncrementalStrategy != "" && !cfg.Incremental {
-			return fmt.Errorf("model %q sets incremental_strategy but is not incremental", modelName)
-		}
-		if cfg.PartitionColumn == "" && cfg.IncrementalStrategy == "insert_overwrite" {
-			return fmt.Errorf("model %q uses incremental_strategy %q without partition_column", modelName, cfg.IncrementalStrategy)
-		}
-	}
-	return nil
-}
-
-func ExecutionPlan(project *Project) ([][]config.ModelConfig, map[string]config.ModelConfig, error) {
+func ExecutionPlan(project *config.Project) ([][]config.ModelConfig, map[string]config.ModelConfig, error) {
 	graph, err := NewGraph(project)
 	if err != nil {
 		return nil, nil, err
@@ -139,10 +29,10 @@ func ExecutionPlan(project *Project) ([][]config.ModelConfig, map[string]config.
 		return nil, nil, fmt.Errorf("dependency cycle detected")
 	}
 
-	return plan, graph.Registry(), nil
+	return plan, graph.registry, nil
 }
 
-func NewGraph(project *Project) (*Graph, error) {
+func NewGraph(project *config.Project) (*Graph, error) {
 	graph := &Graph{
 		project:    project,
 		dependents: make(map[string][]string, len(project.Models)),
@@ -171,10 +61,6 @@ func NewGraph(project *Project) (*Graph, error) {
 	}
 
 	return graph, nil
-}
-
-func (g *Graph) Registry() map[string]config.ModelConfig {
-	return g.registry
 }
 
 func (g *Graph) LayeredPlan() ([][]config.ModelConfig, int) {
@@ -228,7 +114,7 @@ func (g *Graph) DetectCycle() []string {
 	return nil
 }
 
-func visit(project *Project, node string, visited, onStack map[string]bool, stack *[]string) []string {
+func visit(project *config.Project, node string, visited, onStack map[string]bool, stack *[]string) []string {
 	visited[node] = true
 	onStack[node] = true
 	*stack = append(*stack, node)

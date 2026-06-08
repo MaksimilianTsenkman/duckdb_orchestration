@@ -131,8 +131,8 @@ func TestParseModelConfig(t *testing.T) {
     config(
         schema='dwh',
         materialized='incremental',
-        storage_location='gcs',
-        storage_option='gs://bucket/dwh/some_model',
+        storage_type='gcs',
+        storage_path='gs://bucket/dwh/some_model',
         partition_column='event_date',
         incremental_strategy='insert_overwrite',
         cluster_by=['game_id']
@@ -145,11 +145,11 @@ SELECT 1
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if cfg.StorageLocation != "gcs" {
-		t.Fatalf("expected gcs storage location, got %s", cfg.StorageLocation)
+	if cfg.StorageType != "gcs" {
+		t.Fatalf("expected gcs storage type, got %s", cfg.StorageType)
 	}
-	if cfg.StorageOption != "gs://bucket/dwh/some_model" {
-		t.Fatalf("unexpected storage option: %s", cfg.StorageOption)
+	if cfg.StoragePath != "gs://bucket/dwh/some_model" {
+		t.Fatalf("unexpected storage path: %s", cfg.StoragePath)
 	}
 	if cfg.PartitionColumn != "event_date" {
 		t.Fatalf("unexpected partition column: %s", cfg.PartitionColumn)

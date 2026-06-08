@@ -15,6 +15,8 @@ type GCPStorage struct {
 	bucket string
 }
 
+var _ Storage = (*GCPStorage)(nil)
+
 func NewGCPStorage(ctx context.Context, bucket string) (*GCPStorage, error) {
 	client, err := storage.NewClient(ctx)
 	if err != nil {

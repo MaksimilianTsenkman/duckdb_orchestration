@@ -4,7 +4,7 @@ orchestrator
 
 # Environment
 .env
-profile.yml
+setup/profile.yml
 sources.yml
 
 # DuckDB
