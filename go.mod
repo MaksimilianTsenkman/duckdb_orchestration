@@ -1,4 +1,4 @@
-module MaxXx
+module github.com/maksimilian/duckdb-orchestrator
 
 go 1.24
 
@@ -7,6 +7,7 @@ toolchain go1.24.2
 require (
 	cloud.google.com/go/storage v1.51.0
 	github.com/marcboeker/go-duckdb v1.8.5
+	gopkg.in/yaml.v3 v3.0.1
 	google.golang.org/api v0.228.0
 )
 

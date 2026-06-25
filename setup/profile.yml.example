@@ -1,0 +1,6 @@
+duckdb_file: /path/to/orchestrator.duckdb
+models_folder: /path/to/models
+output_folder: /path/to/output
+logs_folder: /path/to/logs
+threads: 4
+full_refresh: false
