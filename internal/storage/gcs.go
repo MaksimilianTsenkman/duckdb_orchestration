@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 
 	"cloud.google.com/go/storage"
 	"google.golang.org/api/iterator"
@@ -13,6 +14,13 @@ import (
 type GCPStorage struct {
 	client *storage.Client
 	bucket string
+}
+
+// ObjectInfo carries the metadata needed to decide whether a local copy of an
+// object is still fresh.
+type ObjectInfo struct {
+	Name string
+	Size int64
 }
 
 var _ Storage = (*GCPStorage)(nil)
@@ -42,12 +50,20 @@ func (s *GCPStorage) DownloadFile(ctx context.Context, objectName, destinationPa
 	}
 	defer rc.Close()
 
-	data, err := io.ReadAll(rc)
-	if err != nil {
+	if err := os.MkdirAll(filepath.Dir(destinationPath), 0755); err != nil {
 		return err
 	}
 
-	return os.WriteFile(destinationPath, data, 0644)
+	f, err := os.Create(destinationPath)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	if _, err := io.Copy(f, rc); err != nil {
+		return err
+	}
+	return f.Close()
 }
 
 func (s *GCPStorage) UploadFile(ctx context.Context, sourcePath, objectName string) error {
@@ -82,6 +98,33 @@ func (s *GCPStorage) ListFiles(ctx context.Context, prefix string) ([]string, er
 		files = append(files, attrs.Name)
 	}
 	return files, nil
+}
+
+// ListObjects returns every object under prefix together with its size, used by
+// callers that want to skip re-downloading objects already cached locally.
+func (s *GCPStorage) ListObjects(ctx context.Context, prefix string) ([]ObjectInfo, error) {
+	var objects []ObjectInfo
+	it := s.client.Bucket(s.bucket).Objects(ctx, &storage.Query{Prefix: prefix})
+	for {
+		attrs, err := it.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		objects = append(objects, ObjectInfo{Name: attrs.Name, Size: attrs.Size})
+	}
+	return objects, nil
+}
+
+// AttrsSize returns the byte size of a single object.
+func (s *GCPStorage) AttrsSize(ctx context.Context, objectName string) (int64, error) {
+	attrs, err := s.client.Bucket(s.bucket).Object(objectName).Attrs(ctx)
+	if err != nil {
+		return 0, err
+	}
+	return attrs.Size, nil
 }
 
 func (s *GCPStorage) DeletePrefix(ctx context.Context, prefix string) error {

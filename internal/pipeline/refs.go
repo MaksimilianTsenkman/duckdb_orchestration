@@ -208,25 +208,22 @@ func downloadGCSLocation(ctx context.Context, location, partitionColumn, cacheDi
 	}
 	defer client.Close()
 
-	objects, err := client.ListFiles(ctx, ensureTrailingSlash(prefix))
+	objects, err := client.ListObjects(ctx, ensureTrailingSlash(prefix))
 	if err != nil {
 		return "", err
 	}
 
 	eg, ctx := errgroup.WithContext(ctx)
-	eg.SetLimit(20)
+	eg.SetLimit(maxStorageConcurrency)
 	for _, obj := range objects {
 		obj := obj
 		eg.Go(func() error {
-			if strings.HasSuffix(obj, "/") {
+			if strings.HasSuffix(obj.Name, "/") {
 				return nil
 			}
-			rel := strings.TrimPrefix(obj, ensureTrailingSlash(prefix))
+			rel := strings.TrimPrefix(obj.Name, ensureTrailingSlash(prefix))
 			localPath := filepath.Join(cacheDir, filepath.FromSlash(rel))
-			if err := os.MkdirAll(filepath.Dir(localPath), 0755); err != nil {
-				return err
-			}
-			return client.DownloadFile(ctx, obj, localPath)
+			return downloadIfStale(ctx, client, obj.Name, localPath, obj.Size)
 		})
 	}
 	if err := eg.Wait(); err != nil {

@@ -34,7 +34,7 @@ func Build(profile *config.Profile) (*Application, error) {
 		return nil, err
 	}
 
-	proj, err := config.LoadProject(
+	project, err := config.LoadProject(
 		profile.ModelsFolder,
 		sqlrender.ParseSQLFileModelConfig,
 		sqlrender.ParseSQLFileRefs,
@@ -44,14 +44,14 @@ func Build(profile *config.Profile) (*Application, error) {
 		return nil, err
 	}
 
-	if err := config.ValidateProjectModels(proj); err != nil {
+	if err := config.ValidateProjectModels(project); err != nil {
 		return nil, err
 	}
-	if err := config.ValidateProjectSources(proj, sources); err != nil {
+	if err := config.ValidateProjectSources(project, sources); err != nil {
 		return nil, err
 	}
 
-	modelsToProcess, modelRegistry, err := dag.ExecutionPlan(proj)
+	modelsToProcess, modelRegistry, err := dag.ExecutionPlan(project)
 	if err != nil {
 		return nil, err
 	}
